@@ -64,6 +64,14 @@ Extract date range: 5/19/2025 to 9/9/2026. `account_id=all` docs don't confirm f
 | expires_at | plausible Tableau context |
 | signed_at | plausible Tableau context |
 
+## Reference — Collection reference (verified via Microsoft Learn docs)
+
+`collectionReference` is a real, documented ADF Copy Activity mapping property (`translator.collectionReference`). Per Microsoft docs: "If you want to iterate and extract data from the objects inside an array field with the same pattern and convert to per row per object, specify the JSON path of that array to do cross-apply." It's what turns the nested `signature_requests` array into one row per signature request, instead of one row for the whole response.
+
+Our value `$['signature_requests']` matches Microsoft's documented JSON path syntax exactly.
+
+Bonus behavior (from same doc): if the array marked as collection reference comes back empty on a given record, and the "Map complex values to string" checkbox is checked, that whole record is silently skipped (not written as a blank row).
+
 ## Note — why the relative URL is dynamic
 
 ForEach iterates through page numbers, so the relative URL must change each pass (a static URL would call page 1 on every iteration). The `pageNumber` dataset parameter is what allows that change. `concat()` is what reassembles the fixed text + changing page number back into one single valid URL string each time, so ADF always sends a complete address (e.g. `v3/signature_request/list?page=7&page_size=20`), never fragmented pieces.
