@@ -20,6 +20,50 @@ Plan: truncate `dbo.signature_requests_raw` before re-running, so old demo data 
 
 `Sequential` checkbox (checked) = iterations run one at a time, in order. Unchecked = parallel execution (faster, but riskier — out-of-order/rate-limited API calls, concurrent writes to same SQL table). Keeping Sequential checked for now, since this is the first real run at full scale (150 pages). Revisit parallel (with a concurrency cap) later if speed becomes a problem.
 
+## Reference — v3/report/create schema (user_activity report)
+
+Tested `report/create` with `report_type: ["user_activity"]`. CSV arrived by email with this schema — team already uses/trusts these columns. Note: this is a **per-user/team aggregate summary**, not per-signature-request rows like our raw extract — different granularity, useful for shaping the eventual Tableau-facing/transformed table, not a replacement for `signature_requests_raw`.
+
+Columns:
+- Email Address
+- Last Name
+- First Name
+- Team Name
+- Templates Owned
+- Requests sent
+- % requests complete
+- % requests cancelled
+- % requests declined
+- Documents signed
+
+(Row data intentionally omitted — real client emails/names, not needed for schema reference.)
+
+## Known limitation — 4 duplicate rows
+
+Full extract: 3000 rows, 2996 distinct `signature_request_id`, 4 duplicates (each 2x). Cause: live data changed during the 150-page sequential pull, shifting records across page boundaries. Not fixed in pipeline — dedup later via `SELECT DISTINCT`/`ROW_NUMBER()` if needed.
+
+## Open question — is this truly ALL historical data?
+
+Extract date range: 5/19/2025 to 9/9/2026. `account_id=all` docs don't confirm full historical coverage (no documented date limit, but not guaranteed either). Need to confirm with Greg/Larry when BRIO's Dropbox Sign account was actually set up — if earlier than 5/19/2025, data is missing.
+
+## Columns we will likely keep (not cutting anything yet — pre-transform)
+
+| Column | Why |
+|---|---|
+| signature_request_id | primary identifier, dedup/counting |
+| sent_from_domain | leading client-grouping key candidate |
+| client_id | other grouping-key candidate |
+| created_at | time-based/trend reporting |
+| is_complete | completion-rate metric |
+| is_declined | decline-rate metric |
+| has_error | flags failed requests |
+| test_mode | filter out non-production/test data |
+| requester_email_address | attribution/audit trail |
+| title | plausible Tableau context |
+| subject | plausible Tableau context |
+| expires_at | plausible Tableau context |
+| signed_at | plausible Tableau context |
+
 ## Note — why the relative URL is dynamic
 
 ForEach iterates through page numbers, so the relative URL must change each pass (a static URL would call page 1 on every iteration). The `pageNumber` dataset parameter is what allows that change. `concat()` is what reassembles the fixed text + changing page number back into one single valid URL string each time, so ADF always sends a complete address (e.g. `v3/signature_request/list?page=7&page_size=20`), never fragmented pieces.
