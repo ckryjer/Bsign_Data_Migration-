@@ -2,6 +2,14 @@
 -- Captured from working session, 2026-09-09
 
 -- ============================================================
+-- Data Dictionary: column names + data types for the table
+-- ============================================================
+SELECT COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'signature_requests_raw'
+ORDER BY ORDINAL_POSITION;
+
+-- ============================================================
 -- Truncate table (used before re-running pipeline with corrected account_id param)
 -- ============================================================
 TRUNCATE TABLE dbo.signature_requests_raw;
@@ -92,3 +100,45 @@ SELECT sent_from_domain, COUNT(*) AS request_count
 FROM dbo.signature_requests_raw
 GROUP BY sent_from_domain
 ORDER BY sent_from_domain;
+
+-- ============================================================
+-- Usage by client (core ticket requirement: request counts groupable by client)
+-- ============================================================
+SELECT sent_from_domain, COUNT(*) AS usage_count
+FROM dbo.signature_requests_raw
+GROUP BY sent_from_domain
+ORDER BY usage_count DESC;
+
+-- ============================================================
+-- Usage by client, excluding NULL sent_from_domain
+-- ============================================================
+SELECT sent_from_domain, COUNT(*) AS usage_count
+FROM dbo.signature_requests_raw
+WHERE sent_from_domain IS NOT NULL
+GROUP BY sent_from_domain
+ORDER BY usage_count DESC;
+
+-- ============================================================
+-- Usage by client, excluding NULLs and any internal BRIO test domains (briolabs*)
+-- ============================================================
+SELECT sent_from_domain, COUNT(*) AS usage_count
+FROM dbo.signature_requests_raw
+WHERE sent_from_domain IS NOT NULL
+  AND sent_from_domain NOT LIKE '%briolabs%'
+GROUP BY sent_from_domain
+ORDER BY usage_count DESC;
+
+-- ============================================================
+-- Count of rows with has_error = true
+-- ============================================================
+SELECT COUNT(*) AS error_count
+FROM dbo.signature_requests_raw
+WHERE has_error = 1;
+
+-- ============================================================
+-- client_id vs sent_from_domain relationship check
+-- ============================================================
+SELECT client_id, sent_from_domain, COUNT(*) AS cnt
+FROM dbo.signature_requests_raw
+GROUP BY client_id, sent_from_domain
+ORDER BY client_id, cnt DESC;
