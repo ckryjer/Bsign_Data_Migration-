@@ -269,3 +269,56 @@ These two are identical — `AS` just improves readability, it isn't required:
 SELECT CONVERT(VARCHAR, created_at, 101) AS created_at FROM signature_requests_raw;
 SELECT CONVERT(VARCHAR, created_at, 101) created_at FROM signature_requests_raw;
 ```
+
+## Data types: why ADF and SQL Server use different names
+
+ADF's pipeline mapping shows types like `Int64`, `Boolean`, `String` — but
+`INFORMATION_SCHEMA.COLUMNS` on the actual SQL Server table shows `bigint`,
+`bit`, `nvarchar`. Same data, two different naming conventions, because
+they're describing two different stages:
+
+- **ADF's names** (`Int64`, `Boolean`, `String`) are its own generic "interim
+  data types," used *during the transfer*, before data lands anywhere
+  specific. ADF needs a neutral in-between vocabulary because it moves data
+  between many different systems (SQL, Cosmos DB, files, APIs).
+- **SQL Server's names** (`bigint`, `bit`, `nvarchar`) are what the data
+  becomes once it's actually stored in a real SQL Server/Azure SQL table —
+  that system's own native type vocabulary.
+
+So `Boolean` (ADF, mid-transfer) becomes `bit` (SQL Server, at rest);
+`Int64` becomes `bigint`; `String` becomes `nvarchar`. Not a disagreement —
+the same concept, described at two different stages by two different tools.
+
+### Our three column types explained
+
+| Data Type | What it means |
+|---|---|
+| `nvarchar` | Variable-length text (Unicode — supports any language's characters). Only uses as much storage as the actual text needs, not a fixed size. Most string columns (`title`, `subject`, `sent_from_domain`, etc.) use this. |
+| `bit` | A boolean — stores exactly `0` or `1` (True/False). Used for flag columns: `test_mode`, `is_complete`, `is_declined`, `has_error`, `required`, `has_pin`. |
+| `bigint` | A large whole number, no decimals. Used for epoch timestamps (`created_at`, `expires_at`) and pagination metadata (`page`, `num_pages`, etc.) — "big" because it holds much larger numbers than a regular `int`. |
+
+Note: none of these is a native date/datetime type — that's why
+`created_at`/`expires_at` need the `DATEADD` conversion from earlier notes;
+they're stored as plain numbers, not real SQL dates.
+
+### Other common SQL Server data types
+
+**Numbers**
+- `int` — regular whole number (smaller range than `bigint`, fine for most counts/IDs)
+- `decimal(p,s)` / `numeric(p,s)` — exact decimal numbers (money, precise math). `p` = total digits, `s` = digits after the decimal point
+- `float` — approximate decimal (faster, but can have tiny rounding errors — avoid for money)
+
+**Text**
+- `varchar(n)` — variable-length text, but **non**-Unicode (basic/English characters only, smaller storage than `nvarchar`)
+- `char(n)` — **fixed**-length text, always pads to exactly `n` characters (rare in practice)
+
+**Dates/Times**
+- `date` — just a calendar date, no time
+- `datetime` / `datetime2` — date + time together (what `created_at` *should* be, once actually converted in a persisted transform, not just a display `SELECT`)
+- `time` — just a time, no date
+
+**Other**
+- `uniqueidentifier` — a native GUID type (globally unique ID). Our
+  `signature_request_id`-style hex strings resemble this format but are
+  stored as plain `nvarchar` text, not this native type.
+- `varbinary` — raw binary data (files, images)
