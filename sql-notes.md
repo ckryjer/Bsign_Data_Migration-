@@ -270,6 +270,108 @@ SELECT CONVERT(VARCHAR, created_at, 101) AS created_at FROM signature_requests_r
 SELECT CONVERT(VARCHAR, created_at, 101) created_at FROM signature_requests_raw;
 ```
 
+## Making a safe working copy before transforming
+
+Never transform the raw/source table directly — make a copy first, and do
+all real work on the copy. The original stays untouched as a fallback.
+
+```sql
+SELECT *
+INTO dbo.signature_requests_transform
+FROM dbo.signature_requests_raw;
+```
+
+`SELECT ... INTO new_table FROM old_table` — simplest, one-line way to make
+a full physical copy. Copies the **data only** — not indexes, primary keys,
+or constraints from the original table. Fine for a working copy meant for
+experimentation, not a perfect structural clone. (For a proper permanent
+table, `CREATE TABLE` + `INSERT INTO ... SELECT` is more correct, since it
+lets you explicitly define real structure/keys/indexes instead of inheriting
+whatever the source happened to have.)
+
+The two tables are fully independent once created — editing/dropping the
+copy does nothing to the original, and the ADF pipeline (which only writes
+to the raw table) has no awareness the copy even exists.
+
+### The other real safety net: transactions
+
+SQL has no general "undo," but `BEGIN TRANSACTION` is the real equivalent
+for any single risky statement.
+
+```sql
+BEGIN TRANSACTION;
+
+-- run the risky statement here, e.g.:
+DELETE FROM dbo.signature_requests_transform WHERE has_error = 1;
+
+-- check the result before committing to it:
+SELECT * FROM dbo.signature_requests_transform;
+
+-- if it's wrong:
+ROLLBACK;
+
+-- if it's right, THIS makes it permanent:
+COMMIT;
+```
+
+`BEGIN TRANSACTION` opens a provisional window — anything run after it takes
+effect for you to inspect, but isn't permanent yet. `ROLLBACK` undoes
+everything back to before `BEGIN TRANSACTION`. `COMMIT` locks it in. Habit
+worth building: never run `DELETE`/`UPDATE`/`ALTER TABLE ... DROP COLUMN`
+without wrapping it in a transaction first.
+
+**Full safety net, layered:** the untouched raw table (ultimate fallback) →
+the `_transform` copy (where real work happens) → transactions (undo any
+single statement before committing to it).
+
+### Why wrap a command like DROP COLUMN in a transaction at all?
+
+You *can* just write `ALTER TABLE ... DROP COLUMN ...` on its own — it's
+valid SQL by itself. The reason not to is about **timing**, not syntax.
+
+**SQL Server's default behavior (autocommit):** every statement, run on its
+own, executes **and becomes permanent immediately** — no automatic pause to
+review it first. If you drop the wrong column this way, it (and its data)
+is just gone. No prompt, no undo. It happened the instant you hit Execute.
+
+**What `BEGIN TRANSACTION` changes:** it turns off that instant-permanence
+behavior for this one block. Everything between `BEGIN TRANSACTION` and
+either `COMMIT` or `ROLLBACK` is held in a "draft" state — SQL Server has
+done the work internally so you can inspect the result, but it isn't
+finalized/locked in yet. A genuine pause to check your work before
+deciding.
+
+**The two ways out of that pause:**
+- `COMMIT` — "yes, keep this" → makes it permanent
+- `ROLLBACK` — "no, undo this" → reverts everything since `BEGIN TRANSACTION`, as if it never ran
+
+So the transaction isn't a different *kind* of `DROP` — same command, just
+given a deliberate checkpoint before it becomes irreversible.
+
+**Example, dropping columns:**
+
+```sql
+BEGIN TRANSACTION;
+
+ALTER TABLE dbo.signature_requests_transform
+DROP COLUMN page, num_pages, num_results, page_size;
+
+-- check the result before deciding:
+SELECT COLUMN_NAME
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'signature_requests_transform';
+
+-- if it's right:
+COMMIT;
+
+-- if it's wrong:
+ROLLBACK;
+```
+
+**Rule of thumb:** if a command could delete/change/remove something, wrap
+it in `BEGIN TRANSACTION ... COMMIT/ROLLBACK`. If it only *reads* data
+(`SELECT`), no transaction needed — nothing to undo from just looking.
+
 ## Data types: why ADF and SQL Server use different names
 
 ADF's pipeline mapping shows types like `Int64`, `Boolean`, `String` — but

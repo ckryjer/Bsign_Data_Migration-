@@ -129,6 +129,14 @@ GROUP BY sent_from_domain
 ORDER BY usage_count DESC;
 
 -- ============================================================
+-- Total usage across all real clients (excludes NULLs and briolabs internal domains)
+-- ============================================================
+SELECT COUNT(*) AS total_usage
+FROM dbo.signature_requests_raw
+WHERE sent_from_domain IS NOT NULL
+  AND sent_from_domain NOT LIKE '%briolabs%';
+
+-- ============================================================
 -- Count of rows with has_error = true
 -- ============================================================
 SELECT COUNT(*) AS error_count
